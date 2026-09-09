@@ -1621,10 +1621,34 @@ its criteria cannot be silently ignored.
 | CCTV | Austin + Caltrans (CA) + TfL London Open Data + Street View fallback | `src/data/cctv.js` | `/api/cctv` | 10s (active) |
 | Radio | Radio Browser (public-domain station directory) | `src/data/radio.js` | `/api/radio/stations`, `/api/radio/click/:uuid` | 45 min directory refresh |
 | Bikeshare 🚲 | GBFS (Lyft + BCycle) | `src/data/bikeshare.js` | `/api/gbfs` | 60s |
+| Transit 🚌 | Operator GTFS-Realtime VehiclePositions (7 keyless regions, `src/data/transitFeeds.js`) | `src/data/transit.js` | `/api/transit` | 15s (poll + glide) |
 | Datacenters ▣ | OSM extract (bundled) | `src/data/localLayers.js` | — | static |
 | Dams ▰ | OpenInfraMap/OSM extract (bundled) | `src/data/localLayers.js` | — | static |
 | Submarine Cables ◠ | TeleGeography public map (bundled) | `src/data/telegeographySubmarineCables.js` | — | static |
 | FIRMS Active Fires ▲ | NASA FIRMS live (VIIRS ×3 NRT, trailing 24h) | `src/data/firmsHeatmap.js` | `/api/firms` (`FIRMS_MAP_KEY`) | 10 min (proxy TTL 30 min) |
+
+Transit polls only the registered feeds whose coverage circle contains the
+camera's look-at point (with a 40 km hysteresis once active) and only below a
+3,000 km altitude gate, so a session over Boston costs one MBTA request per
+15 s and nothing elsewhere. Each vehicle is one point primitive colored by mode
+(bus, tram, metro, rail, ferry — the feed's default refined by per-operator
+route-id hints); on every poll it glides from its last drawn position to the
+new fix over the next poll interval, one interval behind real time, and a
+vehicle missing from two consecutive polls is removed. Fixes older than ten
+minutes are ignored. Surface height is sampled once per ~0.002° cell and at
+most 300 cells per poll, never per frame; points render through the mesh so a
+bus under a 3D roof stays visible. Clicking a vehicle opens a protected
+shared-host card (route, speed, heading, stop status, occupancy, report age)
+that re-anchors every 250 ms while the vehicle moves; Escape or a click on empty
+globe clears it. The layer holds continuous render only while it has vehicles.
+The `/api/transit` proxy resolves an id against the registry, fetches https
+upstreams only (redirects must stay on https), caps bodies at 8 MB, decodes the
+protobuf server-side with `pbf` (`src/data/gtfsRealtime.js` — no
+`gtfs-realtime-bindings`), caches each feed in memory for 15 s with a
+single-flight refresh, and serves a stale snapshot marked `X-GEV-Cache:
+STALE-ERROR` for up to 10 minutes when the upstream fails; the layer reads that
+header as STALE. Each operator's credit is registered dynamically the first
+time its vehicles render.
 
 `src/data/militaryAwareness.js` remains registered internally as the Contacts
 coordinator, but it is not a user-visible Data Layers entry. Its visible entry
