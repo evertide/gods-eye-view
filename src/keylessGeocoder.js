@@ -19,6 +19,9 @@
  * inside komoot's fair-use expectations.
  */
 
+import { normalizeToponym } from './toponym.js';
+import { geocodePdokWithOutcome, shouldAskPdok } from './pdokGeocoder.js';
+
 const PHOTON_ENDPOINT = 'https://photon.komoot.io/api/';
 
 /** Photon is a courtesy service; fail fast rather than hold the search open. */
@@ -233,14 +236,7 @@ export function photonSearchUrl(query, { bias = null, limit = PHOTON_RESULT_LIMI
  * @param {string} text
  * @returns {string}
  */
-export function normalizeToponym(text) {
-  return String(text ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
+export { normalizeToponym };
 
 /**
  * Pick the candidate whose name actually answers `target`.
@@ -300,6 +296,16 @@ function trimPhotonCache() {
 export async function geocodeKeylessWithOutcome(query, { bias = null, fetchImpl = fetch } = {}) {
   const trimmed = String(query ?? '').trim();
   if (!trimmed) return { place: null, answered: true };
+
+  // The Dutch national gazetteer answers first. Photon cannot resolve NL
+  // motorways: measured 2026-09-11, "A13" gave a road in Massachusetts and
+  // "Rijksweg A13" gave the A15 near Opheusden. PDOK gives the A13 at Delft.
+  // It only returns a place when every query token matches as a whole word, so
+  // a non-Dutch query falls straight through to Photon below.
+  if (shouldAskPdok(trimmed)) {
+    const dutch = await geocodePdokWithOutcome(trimmed, { fetchImpl });
+    if (dutch.place) return { place: dutch.place, answered: true };
+  }
 
   const memoKey = `${bias ?? ''}\n${trimmed}`;
   // Only answered outcomes are memoised, so a hit is always an answer.
