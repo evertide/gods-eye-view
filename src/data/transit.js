@@ -38,6 +38,7 @@ import {
   TRANSIT_FEED_REGISTRY,
   TRANSIT_MODE_ICON,
   transitFeedsInRange,
+  TRANSIT_MODES,
   transitModeFor,
 } from './transitFeeds.js';
 
@@ -344,7 +345,11 @@ function applySnapshot(feed, snapshot, { stale }) {
   for (const record of snapshot.vehicles || []) {
     if (isStaleVehicleFix(record, now)) continue;
     const key = transitVehicleKey(feed.id, record.id);
-    const mode = transitModeFor(feed, record.routeId);
+    // The proxy resolves the mode from the operator's static routes.txt when
+    // the feed offers one; the pure per-feed hint stays the fallback.
+    const mode = TRANSIT_MODES.includes(record.mode)
+      ? record.mode
+      : transitModeFor(feed, record.routeId);
     let entry = _vehicles.get(key);
     if (entry) {
       const drawn = interpolatedVehiclePosition(entry, now);

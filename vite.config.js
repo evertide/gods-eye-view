@@ -53,6 +53,7 @@ import {
   normalizeRegionalWeather,
 } from './src/data/regionalBrief.js';
 import { normalizeAdsbLolPointResponse } from './src/data/adsbLolFallback.js';
+import { fetchGtfsRouteModes } from './src/data/gtfsRoutesTable.js';
 import { createAisStreamAdapter, isRecognizedAisEnvelope } from './src/data/aisStreamAdapter.js';
 import { parseSilenceTimeoutEnv } from './src/data/aisWatchdog.js';
 import { keylessHudSummaryResponse } from './src/hudSummaryResponse.js';
@@ -1412,6 +1413,17 @@ function transitProxy() {
     }
     const bytes = await readResponseBytesCapped(upstream, TRANSIT_PROXY_MAX_BODY_BYTES);
     const snapshot = buildTransitSnapshot(feed, bytes, Date.now());
+    // Attach the static mode where the feed offers a route table. Vehicles keep
+    // a null mode when the route is unknown, which the client reads as "use the
+    // feed default" exactly as it did before.
+    const routeModes = await transitRouteModes(feed);
+    if (routeModes.size > 0) {
+      for (const vehicle of snapshot.vehicles) {
+        const mode = routeModes.get(String(vehicle.routeId ?? ''));
+        if (mode) vehicle.mode = mode;
+      }
+    }
+
     const entry = { at: snapshot.fetchedAt, body: JSON.stringify(snapshot), host: new URL(finalUrl).hostname };
     cache.set(feed.id, entry);
     return entry;
@@ -4674,6 +4686,45 @@ export async function fetchCctvImageFromUpstream(url, {
  *
  * @returns {import('vite').Plugin}
  */
+/** Route-mode tables per feed id, with the fetch in flight deduplicated. */
+const _transitRouteModes = new Map();
+const _transitRouteModesInFlight = new Map();
+/** A GTFS archive is rebuilt daily; half a day keeps the join warm either way. */
+const TRANSIT_ROUTE_MODE_TTL_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * Route-mode table for a feed, or an empty map when it declares no archive.
+ *
+ * Never throws and never blocks a refresh on itself: while the first fetch is
+ * in flight the caller gets the empty table and the feed's default mode, which
+ * is the behaviour before the join existed.
+ * @param {object} feed - Registry entry.
+ * @returns {Promise<Map<string,string>>}
+ */
+async function transitRouteModes(feed) {
+  const zipUrl = feed?.routeTypesZipUrl;
+  if (!zipUrl) return new Map();
+  const cached = _transitRouteModes.get(feed.id);
+  if (cached && Date.now() - cached.at < TRANSIT_ROUTE_MODE_TTL_MS) return cached.table;
+  if (_transitRouteModesInFlight.has(feed.id)) return cached?.table || new Map();
+
+  const pending = fetchGtfsRouteModes(zipUrl)
+    .then((table) => {
+      // An empty result is a failure, not an answer: keep any table already
+      // held rather than replacing a good join with nothing.
+      if (table.size > 0) {
+        _transitRouteModes.set(feed.id, { table, at: Date.now() });
+        console.log(`[Transit] ${feed.id}: route modes loaded for ${table.size} routes`);
+      } else {
+        console.warn(`[Transit] ${feed.id}: route-mode table empty; keeping the feed default`);
+      }
+      return table;
+    })
+    .finally(() => _transitRouteModesInFlight.delete(feed.id));
+  _transitRouteModesInFlight.set(feed.id, pending);
+  return cached?.table || new Map();
+}
+
 function cctvProxy() {
   /** @type {Map<string,{id:string,status:string,sourceKind:string,label:string,message:string,updatedAt:number}>} */
   const health = new Map();

@@ -171,6 +171,11 @@ export const TRANSIT_FEED_REGISTRY = Object.freeze([
     licenseUrl: 'https://gtfs.ovapi.nl/README',
     attribution: 'OVapi / Stichting OpenGeo — Dutch integrated real-time transit data',
     defaultMode: 'bus',
+    // A national feed carries every mode, so the default is wrong for most of
+    // it: without this join all five Rotterdam metro lines, every tram and
+    // every train draw as buses. Route ids are regenerated with the daily
+    // rebuild, so the table is fetched rather than baked in.
+    routeTypesZipUrl: 'https://gtfs.ovapi.nl/nl/gtfs-nl.zip',
   }),
   Object.freeze({
     id: 'entur-norway',
